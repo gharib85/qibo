@@ -14,7 +14,8 @@ class TensorflowGate(base_gates.Gate):
     module = sys.modules[__name__]
 
     def __new__(cls, *args, **kwargs):
-        cgate_only = {"I", "M", "Flatten", "CallbackGate", "ZPow", "CZPow"}
+        cgate_only = {"I", "Collapse", "M", "Flatten", "CallbackGate",
+                      "ZPow", "CZPow"}
         if BACKEND.get('GATES') == 'custom' or cls.__name__ in cgate_only:
             return super(TensorflowGate, cls).__new__(cls)
         else:
@@ -169,19 +170,41 @@ class Collapse(TensorflowGate, base_gates.Collapse):
         self.order = None
         self.ids = None
 
+    @staticmethod
+    def _result_to_list(res):
+        if isinstance(res, np.ndarray):
+            return list(res.astype(np.int))
+        if isinstance(res, tf.Tensor):
+            return list(res.numpy().astype(np.int))
+        return list(res)
+
     def _prepare(self):
         self.order = list(self.sorted_qubits)
         self.order.extend((q for q in range(self.nqubits)
                            if q not in self.sorted_qubits))
 
     def __call__(self, state: tf.Tensor, is_density_matrix: bool = False):
-        # TODO: Write custom operator for this
-        # Use Tensorflow primitives temporarily
-        from qibo.tensorflow.gates import Collapse
-        TensorflowGate.__call__(self, state, is_density_matrix)
+        if is_density_matrix: # pragma: no cover
+            # case not implemented yet
+            raise_error(NotImplementedError,
+                        "Collapse gate is not implemented for density matrices.")
         original_shape = state.shape
-        state = tf.reshape(state, self.nqubits * (2,))
-        state = Collapse.__call__(self, state, is_density_matrix)
+        if BACKEND.get('GATES') == 'custom':
+            TensorflowGate.__call__(self, state, is_density_matrix)
+            state = tf.reshape(state, self.nqubits * (2,))
+        else:
+            if self._nqubits is None:
+                self.nqubits = len(tuple(state.shape))
+
+        substate = tf.gather_nd(tf.transpose(state, self.order), self.result)
+        norm = tf.reduce_sum(tf.square(tf.abs(substate)))
+        state = substate / tf.cast(tf.sqrt(norm), dtype=state.dtype)
+        for q, r in zip(self.sorted_qubits, self.result):
+            state = tf.expand_dims(state, axis=q)
+            if r:
+                state = tf.concat([tf.zeros_like(state), state], axis=q)
+            else:
+                state = tf.concat([state, tf.zeros_like(state)], axis=q)
         return tf.reshape(state, original_shape)
 
 
