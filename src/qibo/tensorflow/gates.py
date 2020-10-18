@@ -176,40 +176,6 @@ class Z(TensorflowGate, base_gates.Z):
         return matrices.Z
 
 
-class Collapse(TensorflowGate, base_gates.Collapse):
-
-    def __init__(self, *q: int, result: List[int] = None):
-        base_gates.Collapse.__init__(self, *q, result=result)
-        TensorflowGate.__init__(self)
-        self.order = None
-        self.ids = None
-
-    def _prepare(self):
-        self.order = list(self.sorted_qubits)
-        self.order.extend((q for q in range(self.nqubits)
-                           if q not in self.sorted_qubits))
-
-    def __call__(self, state: tf.Tensor, is_density_matrix: bool = False):
-        if is_density_matrix:
-            raise_error(NotImplementedError)
-        if self._nqubits is None:
-            #if is_density_matrix:
-            # self.nqubits = len(tuple(state.shape)) // 2
-            #else:
-            self.nqubits = len(tuple(state.shape))
-
-        substate = tf.gather_nd(tf.transpose(state, self.order), self.result)
-        norm = tf.reduce_sum(tf.square(tf.abs(substate)))
-        state = substate / tf.cast(tf.sqrt(norm), dtype=state.dtype)
-        for q, r in zip(self.sorted_qubits, self.result):
-            state = tf.expand_dims(state, axis=q)
-            if r:
-                state = tf.concat([tf.zeros_like(state), state], axis=q)
-            else:
-                state = tf.concat([state, tf.zeros_like(state)], axis=q)
-        return state
-
-
 class RX(TensorflowGate, base_gates.RX):
 
     def __init__(self, q, theta):
